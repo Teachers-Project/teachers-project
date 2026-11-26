@@ -37,12 +37,12 @@ public class AnthropicAiClient implements AiClient {
     @Override
     public String polish(String systemPrompt, String userText) {
         if (apiKey == null || apiKey.isBlank() || model == null || model.isBlank()) {
-            throw new AiUnavailableException("AI 설정(API 키, 모델)이 없어 다듬기를 사용할 수 없습니다.");
+            throw new AiUnavailableException("AI 설정(API 키, 모델)이 없어 이 기능을 사용할 수 없습니다.");
         }
         try {
             ObjectNode body = mapper.createObjectNode();
             body.put("model", model);
-            body.put("max_tokens", 512);
+            body.put("max_tokens", 1024);
             body.put("system", systemPrompt);
             ArrayNode messages = body.putArray("messages");
             ObjectNode user = messages.addObject();
