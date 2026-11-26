@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { countBytes } from "./bytes.js";
 import { checkSentence } from "./checks.js";
-import { countChars } from "./limits.js";
+import { countChars, fieldsFor } from "./limits.js";
 
 test("한글 1자는 3바이트, 영문·숫자는 1바이트", () => {
   assert.equal(countBytes("가"), 3);
@@ -76,11 +76,49 @@ test("같은 사유는 한 번만 보고한다", () => {
   assert.equal(r.prohibited.length, 1);
 });
 
-test("글자 수 상한이 기재요령 표와 같다", async () => {
-  const { FIELD_LIMITS } = await import("./limits.js");
-  assert.equal(FIELD_LIMITS.subjectNote.maxChars, 500);
-  assert.equal(FIELD_LIMITS.behavior.maxChars, 300);
-  assert.equal(FIELD_LIMITS.volunteer.maxChars, 50);
-  assert.equal(FIELD_LIMITS.dailyLife.maxChars, 1000);
-  assert.equal(FIELD_LIMITS.reading.maxChars, 250);
+test("중학교 글자 수 상한이 기재요령 표와 같다", () => {
+  const f = fieldsFor("middle");
+  assert.equal(f.subjectNote.maxChars, 500);
+  assert.equal(f.behavior.maxChars, 300);
+  assert.equal(f.volunteer.maxChars, 50);
+  assert.equal(f.dailyLife.maxChars, 1000);
+  assert.equal(f.reading.maxChars, 250);
+  assert.ok(f.freeCareer, "중학교에만 자유학기 영역이 있어야 함");
+});
+
+test("고등학교 글자 수 상한이 기재요령 표와 같다", () => {
+  const f = fieldsFor("high");
+  assert.equal(f.award.maxChars, 100);
+  assert.equal(f.awardTarget.maxChars, 25);
+  assert.equal(f.certificate.maxChars, 100);
+  assert.equal(f.dailyLife.maxChars, 1000);
+  assert.equal(f.reading.maxChars, 250);
+  assert.equal(f.freeCareer, undefined, "고등학교에는 자유학기 영역이 없음");
+});
+
+test("초등학교는 원문상 제한 없는 영역을 null로 표시한다", () => {
+  const f = fieldsFor("elementary");
+  assert.equal(f.personalTalent.maxChars, 500);
+  assert.equal(f.attendanceNote.maxChars, 500);
+  assert.equal(f.volunteer.maxChars, 50);
+  assert.equal(f.dailyLife.maxChars, null);
+  assert.equal(f.award, undefined, "초등학교에는 수상경력 영역이 없음");
+});
+
+test("대회 규칙: 초등은 교내 대회도 금지, 고등은 교내 대회는 허용", () => {
+  const s = "교내 과학 대회에서 상을 받음";
+  assert.ok(checkSentence(s, "elementary").prohibited.length > 0);
+  assert.equal(checkSentence(s, "high").prohibited.length, 0);
+});
+
+test("고등학교에서만 모의고사 성적을 금지한다", () => {
+  const s = "모의고사 성적이 향상됨";
+  assert.ok(checkSentence(s, "high").prohibited.length > 0);
+  assert.equal(checkSentence(s, "middle").prohibited.length, 0);
+});
+
+test("자격증: 고등은 자격증 항목에만 허용하므로 본문에서는 막지 않는다", () => {
+  const s = "한국사능력검정 자격증을 취득함";
+  assert.ok(checkSentence(s, "middle").prohibited.length > 0);
+  assert.equal(checkSentence(s, "high").prohibited.length, 0);
 });

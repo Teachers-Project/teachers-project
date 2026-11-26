@@ -1,23 +1,32 @@
 import { useMemo, useState } from "react";
-import { FIELD_LIMITS, countChars } from "./rules/limits.js";
+import { SCHOOL_LEVELS, fieldsFor, countChars } from "./rules/limits.js";
 import { countBytes } from "./rules/bytes.js";
 import { checkSentence } from "./rules/checks.js";
 import { polishSentence } from "./api.js";
 
-const fieldKeys = Object.keys(FIELD_LIMITS);
+const DEFAULT_LEVEL = "middle";
 
 export default function App() {
-  const [field, setField] = useState("subjectNote");
+  const [level, setLevel] = useState(DEFAULT_LEVEL);
+  const fields = fieldsFor(level);
+  const fieldKeys = Object.keys(fields);
+  const [field, setField] = useState(fieldKeys[0]);
   const [original, setOriginal] = useState("");
   const [revised, setRevised] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const limit = FIELD_LIMITS[field];
-  const check = useMemo(() => checkSentence(original), [original]);
+  const limit = fields[field] ?? fields[fieldKeys[0]];
+  const check = useMemo(() => checkSentence(original, level), [original, level]);
   const bytes = countBytes(original);
   const chars = countChars(original);
-  const overChars = chars > limit.maxChars;
+  const overChars = limit.maxChars !== null && chars > limit.maxChars;
+
+  function changeLevel(next) {
+    setLevel(next);
+    setField(Object.keys(fieldsFor(next))[0]);
+    setRevised("");
+  }
 
   async function handlePolish() {
     setStatus("");
@@ -51,11 +60,22 @@ export default function App() {
       </p>
 
       <label style={{ display: "block", marginTop: 16 }}>
+        학교급
+        <select value={level} onChange={(e) => changeLevel(e.target.value)} style={{ marginLeft: 8 }}>
+          {Object.entries(SCHOOL_LEVELS).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label style={{ display: "block", marginTop: 12 }}>
         영역
         <select value={field} onChange={(e) => setField(e.target.value)} style={{ marginLeft: 8 }}>
           {fieldKeys.map((k) => (
             <option key={k} value={k}>
-              {FIELD_LIMITS[k].label}
+              {fields[k].label}
             </option>
           ))}
         </select>
@@ -70,7 +90,7 @@ export default function App() {
       />
 
       <div style={{ fontSize: 14, marginTop: 6, color: overChars ? "#b00020" : "#333" }}>
-        {chars}자 / {limit.maxChars}자 · {bytes} 바이트 (NEIS 기준)
+        {chars}자 / {limit.maxChars === null ? "별도 제한 없음" : `${limit.maxChars}자`} · {bytes} 바이트 (NEIS 기준)
         {overChars && " · 글자 수 초과"}
       </div>
 
