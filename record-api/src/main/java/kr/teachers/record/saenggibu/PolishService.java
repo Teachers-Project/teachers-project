@@ -9,9 +9,10 @@ public class PolishService {
 
     /** 프론트 limits.js 의 영역 키와 같아야 합니다. 허용되지 않은 영역은 거부합니다. */
     static final Set<String> ALLOWED_FIELDS = Set.of(
-            "personalTalent", "attendanceNote", "award", "autonomy", "club", "career",
-            "volunteer", "dailyLife", "freeCareer", "freeTopic", "freeArtsPE", "freeClub",
-            "subjectNote", "individualNote", "readingCommon", "reading", "behavior");
+            "personalTalent", "attendanceNote", "award", "awardTarget", "certificate",
+            "autonomy", "club", "career", "volunteer", "dailyLife", "freeCareer", "freeTopic",
+            "freeArtsPE", "freeClub", "subjectNote", "individualNote", "readingCommon",
+            "reading", "behavior");
 
     static final String SYSTEM_PROMPT = """
             너는 교사가 직접 쓴 학교생활기록부 문장의 표현만 다듬는 도우미다.
