@@ -16,6 +16,13 @@ public class ApiExceptionHandler {
                 .body(Map.of("error", e.getMessage(), "reasons", e.getReasons()));
     }
 
+    // 원문에 없는 사실이 추가되면 수정본을 막고, 추가된 단어를 알려 준다.
+    @ExceptionHandler(AddedContentException.class)
+    public ResponseEntity<Map<String, Object>> addedContent(AddedContentException e) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(Map.of("error", e.getMessage(), "reasons", e.getReasons()));
+    }
+
     @ExceptionHandler(AiUnavailableException.class)
     public ResponseEntity<Map<String, Object>> aiUnavailable(AiUnavailableException e) {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", e.getMessage()));
