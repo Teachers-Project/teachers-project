@@ -1,10 +1,18 @@
-import { useMemo, useState } from "react";
-import { SCHOOL_LEVELS, fieldsFor, countChars } from "./rules/limits.js";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { SCHOOL_LEVELS, INPUT_MAX, fieldsFor, countChars } from "./rules/limits.js";
 import { countBytes } from "./rules/bytes.js";
 import { checkSentence } from "./rules/checks.js";
-import { polishSentence } from "./api.js";
+import { polishSentence, checkSpelling } from "./api.js";
 
 const DEFAULT_LEVEL = "middle";
+
+// 수정본에서 원문에 없던 어절만 표시합니다 (눈으로 비교하기 쉽게 하는 용도이며 판정에는 쓰지 않습니다).
+function changedWords(original, revised) {
+  const known = new Set(original.split(/\s+/).filter(Boolean));
+  return revised.split(/(\s+)/).map((part, i) =>
+    /^\s+$/.test(part) || known.has(part) ? part : <mark key={i}>{part}</mark>,
+  );
+}
 
 export default function App() {
   const [level, setLevel] = useState(DEFAULT_LEVEL);
@@ -15,12 +23,21 @@ export default function App() {
   const [revised, setRevised] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const [spellBusy, setSpellBusy] = useState(false);
+  const [issues, setIssues] = useState(null); // null: 아직 검사 안 함, []: 오류 없음
+  const resultRef = useRef(null);
+
+  // 수정본이 나오면 비교 화면이 보이도록 자동으로 내려갑니다.
+  useEffect(() => {
+    if (revised && resultRef.current) resultRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [revised]);
 
   const limit = fields[field] ?? fields[fieldKeys[0]];
   const check = useMemo(() => checkSentence(original, level), [original, level]);
   const bytes = countBytes(original);
   const chars = countChars(original);
   const overChars = limit.maxChars !== null && chars > limit.maxChars;
+  const ratio = limit.maxChars ? Math.min(chars / limit.maxChars, 1) : 0;
 
   function changeLevel(next) {
     setLevel(next);
@@ -45,113 +62,206 @@ export default function App() {
     }
   }
 
+  async function handleSpell() {
+    setStatus("");
+    if (check.blocked) {
+      setStatus("학생 식별 정보가 감지되어 검사를 보내지 않았습니다. 해당 부분을 지운 뒤 다시 시도하세요.");
+      return;
+    }
+    setSpellBusy(true);
+    try {
+      const { issues: found } = await checkSpelling({ text: original, field });
+      setIssues(found);
+    } catch (e) {
+      setStatus(e.message);
+    } finally {
+      setSpellBusy(false);
+    }
+  }
+
+  // 교사가 항목을 직접 눌렀을 때만 그 부분을 바꿉니다 (자동 수정 없음).
+  function applyIssue(issue) {
+    if (!original.includes(issue.original)) {
+      setIssues((list) => list.filter((x) => x !== issue));
+      return;
+    }
+    setOriginal(original.replace(issue.original, issue.suggestion));
+    setIssues((list) => list.filter((x) => x !== issue));
+    setRevised("");
+  }
+
+  function changeOriginal(value) {
+    setOriginal(value);
+    setIssues(null); // 문장이 바뀌면 이전 검사 결과는 맞지 않을 수 있어 지웁니다.
+  }
+
   function useRevised() {
-    setOriginal(revised);
+    changeOriginal(revised);
     setRevised("");
     setStatus("수정본을 입력란에 넣었습니다. 저장되지 않았으니 내용을 한 번 더 확인하세요.");
   }
 
   return (
-    <main style={{ maxWidth: 900, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif" }}>
-      <h1 style={{ fontSize: 22 }}>생기부 문장 다듬기 (초안)</h1>
-      <p style={{ color: "#555", fontSize: 14 }}>
-        AI는 교사가 쓴 문장을 다듬기만 합니다. 새 내용을 만들지 않으며, 학생 이름이나 학번 같은 식별 정보는 입력하지 마세요.
-        최종 내용은 교사가 확인해야 하며, 이 화면은 자동으로 저장하지 않습니다.
-      </p>
-
-      <label style={{ display: "block", marginTop: 16 }}>
-        학교급
-        <select value={level} onChange={(e) => changeLevel(e.target.value)} style={{ marginLeft: 8 }}>
-          {Object.entries(SCHOOL_LEVELS).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label style={{ display: "block", marginTop: 12 }}>
-        영역
-        <select value={field} onChange={(e) => setField(e.target.value)} style={{ marginLeft: 8 }}>
-          {fieldKeys.map((k) => (
-            <option key={k} value={k}>
-              {fields[k].label}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <textarea
-        value={original}
-        onChange={(e) => setOriginal(e.target.value)}
-        rows={6}
-        placeholder="교사가 직접 쓴 문장을 입력하세요. 예: 수업 시간에 탐구 활동을 주도적으로 함"
-        style={{ width: "100%", marginTop: 12, padding: 10, fontSize: 15, boxSizing: "border-box" }}
-      />
-
-      <div style={{ fontSize: 14, marginTop: 6, color: overChars ? "#b00020" : "#333" }}>
-        {chars}자 / {limit.maxChars === null ? "별도 제한 없음" : `${limit.maxChars}자`} · {bytes} 바이트 (NEIS 기준)
-        {overChars && " · 글자 수 초과"}
+    <div className="page">
+      <div className="topbar">
+        <div className="wrap">
+          <span className="brand">교사를 위한 학교 도구</span>
+          <span className="where">생활기록부 도우미</span>
+        </div>
       </div>
 
-      {check.studentWarnings.length > 0 && (
-        <Box color="#b00020" title="학생 식별 정보 감지 (다듬기 차단)">
-          {check.studentWarnings.map((w) => (
-            <div key={w}>· {w}</div>
-          ))}
-        </Box>
-      )}
+      <div className="wrap layout">
+        <aside className="side">
+          <div className="eyebrow-row">
+            <p className="eyebrow">생활기록부 도우미</p>
+            <span className="chip">초안</span>
+          </div>
+          <h1>생기부 문장 다듬기</h1>
+          <p className="lede">
+            AI는 교사가 쓴 문장을 다듬기만 합니다. 새 내용을 만들지 않으며, 학생 이름이나 학번 같은 식별 정보는 입력하지 마세요.
+            최종 내용은 교사가 확인해야 하며, 이 화면은 자동으로 저장하지 않습니다.
+          </p>
+          <ul className="rules">
+            <li><b>학생 정보 없이</b><span>식별 정보가 보이면 다듬기를 멈춥니다.</span></li>
+            <li><b>다듬기만</b><span>쓰신 문장의 표현만 고칩니다.</span></li>
+            <li><b>확인은 교사가</b><span>원문과 비교한 뒤 쓸지 정합니다.</span></li>
+          </ul>
+        </aside>
 
-      {check.prohibited.length > 0 && (
-        <Box color="#8a6d00" title="기재 금지 표현 확인 필요">
-          {check.prohibited.map((p) => (
-            <div key={p.reason}>
-              · {p.reason} <span style={{ color: "#777" }}>[{p.source}]</span>
+        <main className="work">
+          <section className="step">
+            <h2><span className="no">01</span>학교급과 영역</h2>
+            <div className="seg" role="radiogroup" aria-label="학교급">
+              {Object.entries(SCHOOL_LEVELS).map(([k, v]) => (
+                <button
+                  key={k}
+                  type="button"
+                  role="radio"
+                  aria-checked={level === k}
+                  className={level === k ? "on" : ""}
+                  onClick={() => changeLevel(k)}
+                >
+                  {v}
+                </button>
+              ))}
             </div>
-          ))}
-        </Box>
-      )}
+            <label className="field">
+              <span className="sr">영역</span>
+              <select className="select" value={field} onChange={(e) => setField(e.target.value)}>
+                {fieldKeys.map((k) => (
+                  <option key={k} value={k}>
+                    {fields[k].label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </section>
 
-      <button
-        onClick={handlePolish}
-        disabled={busy || !original.trim()}
-        style={{ marginTop: 12, padding: "8px 16px", fontSize: 15 }}
-      >
-        {busy ? "다듬는 중..." : "문장 다듬기"}
-      </button>
+          <section className="step">
+            <h2><span className="no">02</span>문장 입력</h2>
+            <textarea
+              className="editor"
+              value={original}
+              onChange={(e) => changeOriginal(e.target.value)}
+              rows={6}
+              maxLength={INPUT_MAX}
+              placeholder="교사가 직접 쓴 문장을 입력하세요. 예: 수업 시간에 탐구 활동을 주도적으로 함"
+            />
+            {limit.maxChars !== null && (
+              <div className="gauge" aria-hidden="true">
+                <i className={overChars ? "over" : ""} style={{ width: `${ratio * 100}%` }} />
+              </div>
+            )}
+            <div className={`meta${overChars ? " over" : ""}`}>
+              {chars}자 / {limit.maxChars === null ? "별도 제한 없음" : `${limit.maxChars}자`} · {bytes} 바이트 (NEIS 기준)
+              {overChars && " · 영역 기재 상한 초과 (기재요령 기준으로 줄여 주세요)"}
+            </div>
 
-      {status && <p style={{ color: "#b00020", fontSize: 14 }}>{status}</p>}
+            {check.studentWarnings.length > 0 && (
+              <Box kind="block" title="학생 식별 정보 감지 (다듬기 차단)">
+                {check.studentWarnings.map((w) => (
+                  <div key={w}>· {w}</div>
+                ))}
+              </Box>
+            )}
 
-      {revised && (
-        <section style={{ marginTop: 20, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <div>
-            <h3 style={{ fontSize: 15 }}>원문</h3>
-            <div style={cardStyle}>{original}</div>
-          </div>
-          <div>
-            <h3 style={{ fontSize: 15 }}>수정본 (AI 다듬기)</h3>
-            <div style={cardStyle}>{revised}</div>
-          </div>
-          <div style={{ gridColumn: "1 / -1", fontSize: 13, color: "#555" }}>
-            수정본은 교사가 확인한 뒤에만 사용하세요. 원문과 수정본의 차이를 직접 비교하는 것이 기본입니다.
-          </div>
-          <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8 }}>
-            <button onClick={useRevised}>수정본 사용</button>
-            <button onClick={() => setRevised("")}>닫기 (원문 유지)</button>
-          </div>
-        </section>
-      )}
-    </main>
-  );
-}
+            {check.prohibited.length > 0 && (
+              <Box kind="check" title="기재 금지 표현 확인 필요">
+                {check.prohibited.map((p) => (
+                  <div key={p.reason}>
+                    · {p.reason} <span className="src">[{p.source}]</span>
+                  </div>
+                ))}
+              </Box>
+            )}
+          </section>
 
-function Box({ color, title, children }) {
-  return (
-    <div style={{ marginTop: 12, borderLeft: `4px solid ${color}`, padding: "8px 12px", background: "#fafafa", fontSize: 14 }}>
-      <strong style={{ color }}>{title}</strong>
-      <div style={{ marginTop: 4 }}>{children}</div>
+          <section className="step">
+            <h2><span className="no">03</span>다듬기와 맞춤법</h2>
+            <div className="actions">
+              <button className="btn primary" onClick={handlePolish} disabled={busy || !original.trim()}>
+                {busy ? "다듬는 중..." : "문장 다듬기"}
+              </button>
+              <button className="btn" onClick={handleSpell} disabled={spellBusy || !original.trim()}>
+                {spellBusy ? "검사하는 중..." : "맞춤법 검사"}
+              </button>
+            </div>
+            {status && <p className="status" role="status">{status}</p>}
+            {issues && (
+              <div className="spell" aria-live="polite">
+                {issues.length === 0 ? (
+                  <p className="spell-ok">맞춤법·띄어쓰기 오류를 찾지 못했습니다.</p>
+                ) : (
+                  <>
+                    <p className="spell-head">고칠 곳 {issues.length}개 · 항목을 눌러 직접 적용하세요</p>
+                    <ul>
+                      {issues.map((it) => (
+                        <li key={it.original + it.suggestion}>
+                          <span className="from">{it.original}</span>
+                          <span className="arrow" aria-hidden="true">→</span>
+                          <span className="to">{it.suggestion}</span>
+                          {it.reason && <span className="why">{it.reason}</span>}
+                          <button type="button" className="btn small" onClick={() => applyIssue(it)}>적용</button>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </div>
+            )}
+          </section>
+
+          {revised && (
+            <section className="step result" ref={resultRef}>
+              <h2><span className="no">04</span>원문과 수정본 비교</h2>
+              <div className="compare">
+                <div>
+                  <h3>원문</h3>
+                  <div className="card-text">{original}</div>
+                </div>
+                <div className="after">
+                  <h3>수정본 (AI 다듬기)</h3>
+                  <div className="card-text">{changedWords(original, revised)}</div>
+                </div>
+              </div>
+              <p className="note">수정본은 교사가 확인한 뒤에만 사용하세요. 원문과 수정본의 차이를 직접 비교하는 것이 기본입니다. 밑줄 친 부분은 원문과 달라진 어절입니다.</p>
+              <div className="actions">
+                <button className="btn primary" onClick={useRevised}>수정본 사용</button>
+                <button className="btn" onClick={() => setRevised("")}>닫기 (원문 유지)</button>
+              </div>
+            </section>
+          )}
+        </main>
+      </div>
     </div>
   );
 }
 
-const cardStyle = { border: "1px solid #ddd", borderRadius: 6, padding: 12, minHeight: 80, whiteSpace: "pre-wrap", fontSize: 15 };
+function Box({ kind, title, children }) {
+  return (
+    <div className={`alert ${kind}`}>
+      <strong>{title}</strong>
+      <div>{children}</div>
+    </div>
+  );
+}
